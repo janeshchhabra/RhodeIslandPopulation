@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+/* 
+  HTML file based off of Mike Bostock's California population geospatial 
+  visualization. 
+  */
+svg {
+  font: 10px sans-serif; /*Font for svg text (caption and key labels)*/
+}
+
+.caption {
+  font-weight: bold; /*caption is bold*/
+}
+
+.key path {
+  display: none;
+}
+
+.key line {
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+.county-border { /*Formatting for county lines. Black lines with .7 opacity*/
+  fill: none;
+  stroke: #000;      
+  stroke-opacity: .7;
+}
+  .state { /*Formatting for state lines. Black lines with 1 opacity*/
+  fill: none;
+  stroke: #000;
+  stroke-opacity: 1;
+}
+  .census { /*Formatting for census lines. Black lines with .7 opacity*/
+  fill: none;
+  stroke: #000;
+  stroke-opacity: .7;
+}
+  .wrapper { /*Formatting for button placement. Placed above key*/
+    position:relative;
+    /*text-align: center;*/
+    left: 460px;
+}
+
+.myButton { /*CSS for buttons.*/
+	background-color:#d16497; /*background color faded pink.*/
+	-moz-border-radius:17px; /*rounded corners*/
+	-webkit-border-radius:17px;
+	border-radius:17px;
+	border:3px solid #b56ab1; /*purplish border*/
+	display:inline-block;
+	cursor:pointer;
+	color:#ffffff; /*Text is white and Verdana is the font*/
+	font-family:Verdana;
+	font-size:13px;  /*size of font*/
+	padding:11px 9px;
+	text-decoration:none;
+	text-shadow:0px 0px 0px #000000;
+}
+.myButton:hover { /*change color to magenta when hover*/
+	background-color:#d40867;
+}
+.myButton:active { /*move slightly when clicked*/
+	position:relative;
+	top:1px;
+}
+
+  
+
+</style>
+<body>
+  <!--Title centered and with custom text -->
+  <h2 style="text-align: center; font-family: Helvetica Neue,Helvetica,Arial,
+             sans-serif; ">Rhode Island Population Density, 2016</h2> 
+    <!--buttons in their own div-->
+<div class="wrapper">
+    <button class="myButton" id="state">Toggle State Boundary</button>
+    <button class="myButton" id="census">Toggle Census Tracts</button>
+    <!--When toggle color clicked, changeColor() runs -->
+    <button class="myButton" id="color" onclick="changeColor();">Toggle Color</button>
+</div>
+    <!--div for JS -->
+  <div>
+<script src="//d3js.org/d3.v3.min.js"></script>
+<script src="//d3js.org/topojson.v1.min.js"></script>
+<script>
+
+var width = 960, //width and height of visualization
+    height = 750;
+var colorChange = false; // Color is not changed at beginning of visualization
+var stateVisible = false; // State and tracts are also not visible at start
+var tractsVisible =  false;
+
+var formatNumber = d3.format(",d"); //format for numbers like 1,000 (comma)
+
+var path = d3.geo.path() //get the geo path with no projection
+    .projection(null);   //projection not needed because land area is not large
+
+var color = d3.scale.threshold() //Set domain and colors (red) for the key
+    .domain([1, 10, 50, 100, 500, 1000, 2000, 5000])
+    .range(["#fff7ec", "#fee8c8", "#fdd49e", "#fdbb84", "#fc8d59", "#ef6548", "#d7301f", "#b30000", "#7f0000"]);
+  
+// A position encoding for the key only.
+var x = d3.scale.linear()
+    .domain([0, 5100]) //based on population
+    .range([0, 480]);
+  
+//Key setup as xaxis
+var xAxis = d3.svg.axis()
+    .scale(x) //scale based on domain and range declared above
+    .orient("bottom")
+    .tickSize(13)
+    .tickValues(color.domain()) //tick values are the color scale
+    //Set the numbers to have commas if needed (1,000 and above)
+    .tickFormat(function(d) { return d >= 100 ? formatNumber(d) : null; });
+
+var svg = d3.select("body").append("svg") //create svg
+    .attr("width", width) //with the width and height declared above
+    .attr("height", height); 
+
+var g = svg.append("g")  //create the key element
+    .attr("class", "key")
+    .attr("transform", "translate(440,17)");
+
+g.selectAll("rect") //Key formatting
+    .data(color.range().map(function(d, i) { //Map numbers to key values
+      return {
+        //x0 and x1 hold the numbers and the width between the numbers
+        x0: i ? x(color.domain()[i - 1]) : x.range()[0],
+        x1: i < color.domain().length ? x(color.domain()[i]) : x.range()[1],
+        z: d // z is just the color
+      };
+    }))
+  .enter().append("rect") //append the rectangle key
+    .attr("height", 8)   //height of the key
+    .attr("x", function(d) { return d.x0; }) //x is x0 set above
+    .attr("width", function(d) { return d.x1 - d.x0; })//width taken from x1-x0
+    .style("fill", function(d) { return d.z; }); // fill is just the color
+
+g.call(xAxis).append("text") //Create caption area
+    .attr("class", "caption") //class set to caption 
+    .attr("y", -6)
+    .text("Population per square mile"); //text of caption
+
+d3.json("RI.json", function(error, RH) { //open topojson file
+  if (error) throw error;
+  console.log(RH);
+  //tracts set to tract file 
+  var tracts = topojson.feature(RH, RH.objects.cb_2015_44_tract_500k);
+
+  // Clip tracts to land.
+  svg.append("defs").append("clipPath")
+      .attr("id", "clip-land")
+    .append("path")
+      //land is based on the county file
+      .datum(topojson.feature(RH, RH.objects.RH_COUNTY))
+      .attr("d", path);
+
+  // Group tracts by color for faster rendering.
+  svg.append("g")
+      .attr("class", "tract")
+      .attr("clip-path", "url(#clip-land)")
+    .selectAll("path")
+      .data(d3.nest()
+          //Set color here. It takes in Population/area*(metric conversion constant)
+        .key(function(d) { return color(d.properties.population / d.properties.area * 2.58999e6); })
+        .entries(tracts.features.filter(function(d) { return d.properties.area; })))
+    .enter().append("path") //Fill mased on the keys received from earlier
+      .style("fill", function(d) { return d.key; }) 
+      .attr("d", function(d) { return path({type: "FeatureCollection", features: d.values}); });
+
+  // Draw county borders.
+  svg.append("path")
+      .datum(topojson.mesh(RH, RH.objects.RH_COUNTY, function(a, b) { return a !== b; }))
+      .attr("class", "county-border") //class set so we can change from css
+      .attr("d", path);
+  
+  // Draw state borders
+  svg.append("path")
+      // Have to do a==b for State
+      .datum(topojson.mesh(RH, RH.objects.RH_STATE, function(a, b) { return a == b; }))
+      .attr("class", "state")
+      .attr("id", "RHstate") //ID to make it easier to edit the lines later
+      .attr("d", path);
+  //Instantly set opacity to 0, don't want it to be visible right away
+  d3.selectAll("#RHstate").style("stroke-opacity", 0);
+  // Draw Census tracts  
+  svg.append("path")
+      .datum(topojson.mesh(RH, RH.objects.cb_2015_44_tract_500k, function(a, b) { return a !== b; }))
+      .attr("class", "census")
+      .attr("id", "RHcensus") //ID set to make it easier to edit lines later
+      .attr("d", path);
+  //Instantly set opacity to 0, don't want it to be visible right away
+  d3.selectAll("#RHcensus").style("stroke-opacity", 0);
+
+  //If state button is clicked, run this function
+  document.getElementById("state").onclick = function () {
+      stateVisible = !stateVisible; //State visibility is changed
+      if(stateVisible){
+        //Change opacity to 1 if it should be visible
+        d3.selectAll("#RHstate").style("stroke-opacity", 1);
+      }
+    else{
+        //Change opacity to 0 if it should be invisible
+        d3.selectAll("#RHstate").style("stroke-opacity", 0);
+    }
+  };
+  //If census button is clicked, run this function
+  document.getElementById("census").onclick = function () {
+      tractsVisible = !tractsVisible;//tract visibility is changed
+      if(tractsVisible){
+        //Change opacity to 1 if it should be visible
+        d3.selectAll("#RHcensus").style("stroke-opacity", .7);
+      }
+      else{
+        //Change opacity to 0 if it should be invisible
+        d3.selectAll("#RHcensus").style("stroke-opacity", 0);
+      }
+  };  
+  
+  
+  //Run this function if color button is clicked  
+  changeColor = function(){
+      colorChange = !colorChange;//color is changed
+      if(colorChange){
+        //If color changes from default, change to green scale
+        color.range(["#ecfff7", "#c8fee8", "#9efdd4", "#84fdbb", "#59fc8d", "#48ef65", "#1fd730", "#00b300", "#007f00"]);
+      }
+      else{
+        //If color changes back to default change to red scale
+        color.range(["#fff7ec", "#fee8c8", "#fdd49e", "#fdbb84", "#fc8d59", "#ef6548", "#d7301f", "#b30000", "#7f0000"]);
+      }
+    //Redraw the the key with the new colors
+    g.selectAll("rect")
+    .data(color.range().map(function(d, i) {
+      return {
+        x0: i ? x(color.domain()[i - 1]) : x.range()[0],
+        x1: i < color.domain().length ? x(color.domain()[i]) : x.range()[1],
+        z: d
+      };
+    }))
+    .style("fill", function(d) { return d.z; }); //change style to new colors
+      
+
+  // Group tracts by color for faster rendering.
+  // Redraw and recolor with new colors
+  svg.selectAll("tract")
+      .data(d3.nest()
+        // Key is set with new colors
+        .key(function(d) { return color(d.properties.population / d.properties.area * 2.58999e6); })
+        .entries(tracts.features.filter(function(d) { return d.properties.area; })))
+    .enter().append("path")
+      .style("fill", function(d) { return d.key; }) //Fill with new colors
+      .attr("d", function(d) { return path({type: "FeatureCollection", features: d.values}); });
+
+      
+    // Draw county borders.
+    // Do this again so that it is visible over new coloring
+    svg.append("path")
+      .datum(topojson.mesh(RH, RH.objects.RH_COUNTY, function(a, b) { return a !== b; }))
+      .attr("class", "county-border")
+      .attr("d", path);
+      
+    //Draw census tracts
+    //Redraw over new coloring
+    svg.append("path")
+      .datum(topojson.mesh(RH, RH.objects.cb_2015_44_tract_500k, function(a, b) { return a !== b; }))
+      .attr("class", "census")
+      .attr("id", "RHcensus")
+      .attr("d", path);
+      
+    //Draw state borders
+    //Redraw over new coloring
+    svg.append("path")
+      .datum(topojson.mesh(RH, RH.objects.RH_STATE, function(a, b) { return a == b; }))
+      .attr("class", "state")
+      .attr("id", "RHstate")
+      .attr("d", path);
+    
+    //If state was visible before color change
+    if(stateVisible){
+        //Set it to be visible
+        d3.selectAll("#RHstate").style("stroke-opacity", 1);
+
+      }
+      else{
+        //Otherwise set it to be invisible
+        d3.selectAll("#RHstate").style("stroke-opacity", 0);
+      }
+      //If tracts were visible before color change
+      if(tractsVisible){
+        //Set them to be visible
+        d3.selectAll("#RHcensus").style("stroke-opacity", .7);
+    
+      }
+      else{
+        //Otherwise set them to be invisible
+        d3.selectAll("#RHcensus").style("stroke-opacity", 0);
+      }
+      
+      
+    }
+  
+});
+  
+d3.select(self.frameElement).style("height", height + "px");
+
+</script>
+    </div>
+  <div>
+    <!--Credits for the visualization-->
+    <h3 style="text-align: center; font-family: Helvetica Neue,Helvetica,Arial,
+             sans-serif; ">Janesh Chhabra<br>
+        Instructor: Suresh Lodha<br>
+        CMPS 165: Data programming for Visualization<br>
+        Fall 2016</h3>
+  </div>
+</body>
